@@ -1,0 +1,63 @@
+name: TLS Security Check
+
+on:
+  pull_request:
+    paths:
+      - '**/*.kt'
+      - '**/*.java'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.kt'
+      - '**/*.java'
+
+jobs:
+  tls-security-check:
+    name: Enforce TLSv1.2+ Usage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for weak TLS protocol usage
+        run: |
+          echo "Scanning for unsafe SSLContext.getInstance(\"TLS\") usage..."
+
+          # Find any usage of the bare "TLS" string (without a version)
+          # This catches getInstance("TLS") but not getInstance("TLSv1.2") or getInstance("TLSv1.3")
+          MATCHES=$(grep -rn 'SSLContext\.getInstance("TLS")' --include="*.kt" --include="*.java" . || true)
+
+          if [ -n "$MATCHES" ]; then
+            echo ""
+            echo "❌ ERROR: Unsafe TLS protocol usage detected!"
+            echo "   Use SSLContext.getInstance(\"TLSv1.2\") or SSLContext.getInstance(\"TLSv1.3\") instead."
+            echo ""
+            echo "Offending files:"
+            echo "$MATCHES"
+            echo ""
+            echo "See PR #18832 and issue #18803 for context."
+            exit 1
+          fi
+
+          echo "✅ No unsafe TLS protocol usage found."
+
+      - name: Check for deprecated TLS versions
+        run: |
+          echo "Scanning for explicitly deprecated TLS versions (TLSv1.0, TLSv1.1)..."
+
+          MATCHES=$(grep -rn 'SSLContext\.getInstance("TLSv1\(\.\(0\|1\)\)\?")\|enabledProtocols.*TLSv1\b\|enabledProtocols.*TLSv1\.1' \
+            --include="*.kt" --include="*.java" . || true)
+
+          if [ -n "$MATCHES" ]; then
+            echo ""
+            echo "❌ ERROR: Deprecated TLS version detected (TLSv1.0 or TLSv1.1)!"
+            echo "   These protocols are insecure and must not be used."
+            echo ""
+            echo "Offending files:"
+            echo "$MATCHES"
+            exit 1
+          fi
+
+          echo "✅ No deprecated TLS versions found."
